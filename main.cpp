@@ -12,6 +12,10 @@
 #include "object3d.h"
 #include "texture.h"
 
+#define VIEW_RADIUS 21.0f
+#define LOD_RADIUS 14.0f
+#define COS_HALF_FOV 0.30f
+
 // short chega ate 32767. Ele usa 16 bits de memoria (2 bytes (x = 2 bytes e z = 2 bytes; total = 4 bytes)) com range [-32767, 32767]
 /*
 g_tileCount - qtd tiles por fila
@@ -30,8 +34,8 @@ float PosVehicleZ = 2.0f;
 float angleVehicle = 0.0f;
 float speedVehicle = 0.0f;
 
-float camDist = 3.0f;
-float camHeight = 1.5f;
+float camDist = 1.5f;
+float camHeight = 0.6f;
 
 ScePspFVector3 g_eye, g_center;
 
@@ -271,13 +275,31 @@ void UpdateVehicle(float dt)
     }
 }
 
+void GridAdjancey(int mapData) {
+    bool roadUp = (z > 0) && (mapData[z - 1][x] >= 1 && mapData[z - 1][x] <= 12);
+    bool roadDown = 
+    bool roadLeft = 
+    bool roadRight =  
+
+}
+
 void SetupCameraFollowingCar()
 {
+    float fov = 30.0f; // quanto menos graus mais perto
+    float far_dist = 20.0f;
+    float near_dist = 0.5f;
     // psp roda a 222MHz por padrao. Da pra forçar.
     // Isso da aprox 50% de cpu e 66% mais de banda de barramento (antes era 111MHZ).
     sceGumMatrixMode(GU_PROJECTION);
     sceGumLoadIdentity();
-    sceGumPerspective(60.0f, 16.0f / 9, 0.5f, 20.0f);
+    /*
+    fovy: O ângulo de visão vertical, em graus.
+    aspect: A proporção da tela (largura dividida pela altura).
+    near: A distância mínima de renderização (evita que objetos muito próximos cortem a tela).
+    far: A distância máxima de renderização (limita até onde a câmera consegue ver).
+    
+    */
+    sceGumPerspective(45.0f, 16.0f / 9, near_dist, far_dist);
 
     sceGumMatrixMode(GU_VIEW);
     sceGumLoadIdentity();
@@ -304,7 +326,7 @@ void SetupCameraFollowingCar()
 void DrawVehicle()
 {
     ScePspFVector3 pos = { PosVehicleX, 0.0f, PosVehicleZ };
-    ScePspFVector3 scale = { 0.2f, 0.2f, 0.2f };
+    ScePspFVector3 scale = { 0.15f, 0.15f, 0.15f };
 
     sceGumPushMatrix();
         sceGumTranslate(&pos);
@@ -327,76 +349,24 @@ static void DesenhaLadrilho(float x, float z, unsigned int color)
     );
 }
 
-// // Equivalente ao DesenhaCubo() da referencia: prisma completo (predio)
-static void DesenhaCubo(float x, float z, float altura, unsigned int color)
+void DrawBuilding(Objeto3D& model, float x, float z, float scale, float rotY)
 {
-    const float H = altura;
-
-    // topo
-    PushQuad(
-        x,       H, z,
-        x + 1.0f, H, z,
-        x + 1.0f, H, z + 1.0f,
-        x,       H, z + 1.0f,
-        0, 1, 0,
-        color
-    );
-    // frente (-z)
-    PushQuad(
-        x,       0, z,   x + 1.0f, 0, z,   x + 1.0f, H, z,   x, H, z,
-        0, 0, -1, color
-    );
-    // tras (+z)
-    PushQuad(
-        x + 1.0f, 0, z + 1.0f, x, 0, z + 1.0f, x, H, z + 1.0f, x + 1.0f, H, z + 1.0f,
-        0, 0, 1, color
-    );
-    // esquerda (-x)
-    PushQuad(
-        x, 0, z + 1.0f, x, 0, z, x, H, z, x, H, z + 1.0f,
-        -1, 0, 0, color
-    );
-    // direita (+x)
-    PushQuad(
-        x + 1.0f, 0, z, x + 1.0f, 0, z + 1.0f, x + 1.0f, H, z + 1.0f, x + 1.0f, H, z,
-        1, 0, 0, color
-    );
-}
-
-void DrawBuilding(Objeto3D& modelo, float x, float z, float scale, float rotY)
-{
-    float offsetX = modelo.getCenterX() * scale;
-    float offsetZ = modelo.getCenterZ() * scale;
+    // float offsetX = modelo.getCenterX() * scale;
+    // float offsetZ = modelo.getCenterZ() * scale;
 
     // ScePspFVector3 pos = { x - offsetX, 0.0f, z - offsetZ};
     ScePspFVector3 pos = { x , 0.0f, z };
     ScePspFVector3 scl = { scale, scale, scale };
+    ScePspFVector3 center = { model.getCenterX(), 0.0f, -model.getCenterZ() };
 
     sceGumPushMatrix();
         sceGumTranslate(&pos);
         sceGumRotateY(rotY * M_PI / 180.0f);
         sceGumScale(&scl);
-        modelo.desenha();
+        sceGumTranslate(&center);
+        model.desenha();
     sceGumPopMatrix();
 }
-
-// void BuildFloor()
-// {
-//     g_vertCount = 0;
-//     const unsigned int defaultColor = 0xFF004400;
-
-//     for (int z = 0; z < mapHeight; z++)
-//         for (int x = 0; x < mapWidth; x++) {
-//             // desenha gramam ou qualquer outra coisa sos se a celula nao for a rua.
-//             if (mapData[z][x] < 1 || mapData[z][x] > 12) {
-//                 DesenhaLadrilho((float)x, (float)z, defaultColor);
-//             }
-//         }
-// }
-
-#define VIEW_RADIUS 14.0f
-#define LOD_RADIUS 7.0f
-#define COS_HALF_FOV 0.30f
 
 // o predios eh desenhado a cada loop.
 void DrawBuildingsAndStreets(float scaleBuildingA, float scaleBuildingB, float scaleBuildingC)
@@ -450,11 +420,20 @@ void DrawBuildingsAndStreets(float scaleBuildingA, float scaleBuildingB, float s
                 int seed = (x * 13) + (z * 17);
                 float rotY = (float)((seed % 4) * 90);
                 if (d2 > LOD_RADIUS*LOD_RADIUS) {   
-                    DesenhaCubo((float)x, (float)z, 2.0f + (seed % 4), 0XFF808090);
+                        sceGumDrawArray(
+                        GU_TRIANGLES,
+                        GU_COLOR_8888 |
+                        GU_NORMAL_32BITF |
+                        GU_VERTEX_32BITF |
+                        GU_TRANSFORM_3D,
+                        g_vertCount,
+                        NULL,
+                        g_verts
+                    );
                 } else {
-                    int buildingType = seed % 3;
-                    if (buildingType == 0) DrawBuilding(buildingAModel, x, z, scaleBuildingA, rotY);
-                    else if (buildingType == 1) DrawBuilding(buildingBModel, x, z, scaleBuildingB, rotY);
+                    int sortedbuildingType = seed % 3;
+                    if (sortedbuildingType == 0) DrawBuilding(buildingAModel, x, z, scaleBuildingA, rotY);
+                    else if (sortedbuildingType == 1) DrawBuilding(buildingBModel, x, z, scaleBuildingB, rotY);
                     else DrawBuilding(buildingCModel, x, z, scaleBuildingC, rotY);
                 }
             }
@@ -644,16 +623,6 @@ int main()
 
         SetupCameraFollowingCar();
         DrawGround();
-        // sceGumDrawArray(
-        //     GU_TRIANGLES,
-        //     GU_COLOR_8888 |
-        //     GU_NORMAL_32BITF |
-        //     GU_VERTEX_32BITF |
-        //     GU_TRANSFORM_3D,
-        //     g_vertCount,
-        //     NULL,
-        //     g_verts
-        // );
 
         DrawBuildingsAndStreets(scaleBuildingA, scaleBuildingB, scaleBuildingC);
         FlushStreetTiles();
@@ -666,8 +635,8 @@ int main()
         sceRtcGetCurrentTick(&t2);
 
         // pra debug
-        float cpuMs = (float)(t1-t0)/res*1000.0f;   // cpuMs alto -> você é CPU-bound (matrizes, loops, sceGuGetMemory) -> itens 2, 3.
-        float gpuMs = (float)(t2-t1)/res*1000.0f;  // gpuMs alto -> é GPU-bound (vértices, texturas, fillrate) -> itens 2, 4, 5.
+        g_cpuMs = (float)(t1-t0)/res*1000.0f;   // cpuMs alto -> você é CPU-bound (matrizes, loops, sceGuGetMemory) -> itens 2, 3.
+        g_gpuMs = (float)(t2-t1)/res*1000.0f;  // gpuMs alto -> é GPU-bound (vértices, texturas, fillrate) -> itens 2, 4, 5.
         ProfilerUpdateFPS();
 
         pspDebugScreenSetOffset((int)fbp0);
