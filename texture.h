@@ -60,7 +60,7 @@ static void GenerateMipmaps(PspTexture& tex) {
 
 // Carrega o .raw gerado pelo script Python.
 // Retorna true em sucesso.
-inline bool LoadTexturePsp(const char* filename, PspTexture& tex)
+inline bool LoadTexturePsp(const char* filename, PspTexture& tex, bool comMipmap = true)
 {
     FILE* f = fopen(filename, "rb");
     if (!f) return false;
@@ -80,9 +80,9 @@ inline bool LoadTexturePsp(const char* filename, PspTexture& tex)
     fclose(f);
 
     tex.width = (int)w; tex.height = (int)h; tex.nLevels = 1;
-    GenerateMipmaps(tex);
+    if (comMipmap) GenerateMipmaps(tex);  
 
-    sceKernelDcacheWritebackInvalidateAll();   // <psputils.h>
+    sceKernelDcacheWritebackInvalidateAll();
     return true;
 }
 

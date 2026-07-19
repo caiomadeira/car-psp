@@ -4,27 +4,38 @@
 #include "common.h"
 #include "texture.h"
 
-enum TextureID {
-    TEX_NONE = 0,
-    TEX_ROAD_CROSS, // 1
-    TEX_ROAD_DL,    // 2
-    TEX_ROAD_DLR,   // 3
-    TEX_ROAD_DR,    // 4
-    TEX_ROAD_LR,    // 5
-    TEX_SIDEWALK, // 6 
-    TEX_ROAD_UD,    // 7
-    TEX_ROAD_UDL,   // 8
-    TEX_ROAD_UDR,   // 9
-    TEX_ROAD_UL,    // 10
-    TEX_ROAD_ULR,   // 11
-    TEX_ROAD_UR,    // 12
-    TEX_SAND,   // 13
-    TEX_SKY,        // 14
-    TEX_SIDEWALK_BEACH,      // 15
-    MAX_TEXTURES    // 16
+struct TexDef {
+    int mapCode; // numero da celula no mapa.txt
+    const char* file; // arquivo de textura em assets/tex/
+    bool mipmap;
 };
-extern PspTexture environment_textures[MAX_TEXTURES];
 
-void LoadAllEnvironmentTextures();
+static const TexDef TEX_TABLE[] = {
+    {  1, "CROSS",          true },
+    {  2, "DL",             true },
+    {  3, "DLR",            true },
+    {  4, "DR",             true },
+    {  5, "LR",             true },
+    {  7, "UD",             true },
+    {  8, "UDL",            true },
+    {  9, "UDR",            true },
+    { 10, "UL",             true },
+    { 11, "ULR",            true },
+    { 12, "UR",             true },
+    { 13, "sand",           true },
+    { 14, "sidewalk",       true },
+    { 15, "sidewalk_beach", true },
+    { 16, "asphalt",        true },
+};
+
+#define NUM_ENV_TEX (int)(sizeof(TEX_TABLE)/sizeof(TEX_TABLE[0]))
+#define MAX_MAP_CODE 64 //maior mapcode possivel acima disso os indices adicionados sao tratados como invalidos (-1)
+
+#define MAPCODE_ASPHALT 16 // p ser usado sem percorrer o enum
+
+// carrega todas as texturas da tabela, chama uma vez no loading
+int LoadAllEnvironmentTextures();
+int TexSlotFromMapCode(int mapCode);
+PspTexture& EnvTexture(int slot);
 
 #endif

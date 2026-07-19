@@ -1,5 +1,5 @@
 TARGET = car
-OBJS = main.o common.o map.o psptexture.o
+OBJS = main.o common.o map.o psptexture.o screen.o hud.o
 
 INCDIR =
 CFLAGS = -G0 -Wall -O2

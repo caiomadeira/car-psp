@@ -21,15 +21,6 @@ extern float g_gpuMs;
 extern int g_frames;
 extern u64 g_fpsTick;
 
-enum GameState {
-    STATE_MENU,
-    STATE_PLAYING,
-    STATE_QUIT
-};
-
-int Menu(void);
-void LoadingScreen(const char* msg);
-
 void ProfilerUpdateFPS(void);
 void SetupCallbacks(void);
 #define print pspDebugScreenPrintf

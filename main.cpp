@@ -4,154 +4,110 @@
 #include "texture.h"
 #include "hud.h"
 #include "psptexture.h"
+#include "screen.h"
 
 PSP_MODULE_INFO("CityMap", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
 PSP_HEAP_SIZE_KB(-256); // -256 = garante tudo menos 256kb ou seja to pegando o maximo possivel
 
-static int showHud = 1;
-
-float budget = 1000.0f / 60.0f;                   // 16.67 ms por frame
-float cpuPct = (g_cpuMs / budget) * 100.0f;
-float gpuPct = (g_gpuMs / budget) * 100.0f;
-static int g_drawCalls = 0;
-static int g_trisDrawn = 0;
-
-int cpuMhz = scePowerGetCpuClockFrequency();      // deve dar 333
-int busMhz = scePowerGetBusClockFrequency();       // deve dar 166
-int battery = scePowerGetBatteryLifePercent();  
+#define SKIP_MENU 0
 
 #define FAR_DIST     (VIEW_RADIUS + 10.0f)
 #define VIEW_RADIUS 14.0f
 #define LOD_RADIUS 7.0f
 #define COS_HALF_FOV 0.30f
+#define NEAR_GUARD 4.0f
 
-// short chega ate 32767. Ele usa 16 bits de memoria (2 bytes (x = 2 bytes e z = 2 bytes; total = 4 bytes)) com range [-32767, 32767]
-/*
-g_tileCount - qtd tiles por fila
-*/
-struct TileRef {
-    short x, z; 
-};
+#define MAX_TILES_PER_TYPE 128 // limitando a fuka de acordo com a capacidade do display list
 
-#define TYPES_TEXTURE_COUNT 13 // qtd de diferentes texturas
-static TileRef g_tiles[TYPES_TEXTURE_COUNT][512]; // [tipo][index] - uma fila por tipo de textura. 
-static int g_tileCount[TYPES_TEXTURE_COUNT]; // 
-// custo de memoria 13 * 512 * 4 = 26624 bytes = 26 kb
-
+// --------- variaveis do veiculo (player)
 float PosVehicleX = 2.0f;
 float PosVehicleZ = 2.0f;
 float angleVehicle = 0.0f;
 float speedVehicle = 0.0f;
 
+// --------- camera 
 float camDist = 1.2f;
 float camHeight = 0.6f;
-
 ScePspFVector3 g_eye, g_center;
 
+// --------- GPU
 unsigned int __attribute__((aligned(16))) list[262144];
+void* fbp0 = (void*)0;
 
+// ---------- modelos
 Objeto3D buildingAModel;
 Objeto3D buildingBModel;
 Objeto3D buildingCModel;
 Objeto3D carModel;
 
-// codigos que definem o tipo do elemento em uma celula (igual referencia OpenGL)
-#define VAZIO  0
-#define PREDIO 5
-#define RUA    0   // no seu mapa atual, 0 == rua/vazio
+// -------- HUD e telemetria 
+static int showHud = 1;
+static int g_drawCalls = 0;
+static int g_trisDrawn = 0;
 
+// ----- filas baching pra textura
+// short chega ate 32767. Ele usa 16 bits de memoria (2 bytes (x = 2 bytes e z = 2 bytes; total = 4 bytes)) com range [-32767, 32767]
+/*
+g_tileCount - qtd tiles por fila
+*/
+struct TileRef { short x, z; };
+static TileRef g_tiles[NUM_ENV_TEX][MAX_TILES_PER_TYPE]; // [tipo][index] - uma fila por tipo de textura. 
+static int g_tileCount[NUM_ENV_TEX]; 
 
-void* fbp0 = (void*)0;
-u64 t0, t1, t2;
-float res = (float)sceRtcGetTickResolution();
-
-struct VertexColor
-{
-    unsigned int color;
-    float nx, ny, nz;
-    float x, y, z;
-};
-
+// ------- estruturas de vertices
 struct VertexTextured {
     float u, v;
     unsigned int color;
     float x, y, z;
 };
 
-#define MAX_VERTS 40000
-static VertexColor __attribute__((aligned(16))) g_verts[MAX_VERTS];
-static int g_vertCount = 0;
-
-static char loadingLog[16][64];
-static int loadingLines = 0;
-
-int Menu(void)
+/*
+static void QueueStreetTile(int x, int z, int mapCode)
+---------------------------------------------------------------------
+Recebe o codigo do mapa (numero do mapa.txt, a entrada da matriz) e 
+converte para um slot de entrada. Caso tenha algum codigo que nao existe
+só ignora.
+*/
+static void QueueStreetTile(int x, int z, int mapCode) 
 {
-    int selected = 0;
-    const char* items[2] = {"Play", "Quit"};
-    SceCtrlData pad, oldPad;
-    sceCtrlReadBufferPositive(&oldPad, 1);
-    while(1) {
-        sceCtrlReadBufferPositive(&pad, 1);
-        unsigned int pressed = pad.Buttons & ~oldPad.Buttons;
-        oldPad = pad;
+    
+    int slot = TexSlotFromMapCode(mapCode);
+    if (slot < 0) return;
 
-        if (pressed & (PSP_CTRL_UP | PSP_CTRL_DOWN)) selected ^= 1;
-        if (pressed & PSP_CTRL_CROSS)
-            return (selected == 0) ? STATE_PLAYING : STATE_QUIT;
-
-
-        sceGuStart(GU_DIRECT, list);
-        sceGuClearColor(0xFF000000);
-        sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
-        Begin2D();
-        DrawFullScreen(bgTex);
-
-        DrawText2D("Car Game Psp", 150, 60, 3.0f, 0xFFFFFFFF);
-
-
-        for (int i = 0; i < 2; i++) {
-            unsigned int cor = (i == selected) ? 0xFF00FFFF : 0xFFAAAAAA;
-            float px = (i == selected) ? 180 : 200;       // item ativo desloca
-            DrawText2D(items[i], px, 150 + i * 40, 2.0f, cor);
-        }
-
-        DrawText2D("Cima/Baixo  X: escolher", 120, 250, 1.0f, 0xFFCCCCCC);
-        End2D();
-        sceGuFinish();
-        sceGuSync(0, 0);
-        sceDisplayWaitVblankStart();
-        fbp0 = sceGuSwapBuffers();
+    if (g_tileCount[slot] < MAX_TILES_PER_TYPE) {
+        g_tiles[slot][g_tileCount[slot]].x = (short)x;
+        g_tiles[slot][g_tileCount[slot]].z = (short)z;
+        g_tileCount[slot]++;
     }
 }
 
-// define filas para as texturas 
-static void QueueStreetTile(int x, int z, int type) {
-    if (g_tileCount[type] < 512) {
-        g_tiles[type][g_tileCount[type]].x = x;
-        g_tiles[type][g_tileCount[type]].z = z;
-        g_tileCount[type]++;
-    }
-}
-
-// flush eh basicamente descarregar/ativar a textura pra GPU (bind) e chamar um drawcall c todos os tiels daquele tipo de uma vez.
-void FlushStreetTiles(void) {
+/* 
+void FlushStreetTiles(void)
+----------------------------------------------------------------
+flush eh basicamente descarregar/ativar a textura pra GPU (bind) 
+e chamar um drawcall c todos os tiels daquele tipo de uma vez.
+Em resumo, faz 1 bind + 1 draw call por tipo de textura, em vez de 1 por tile.
+*/
+void FlushStreetTiles(void) 
+{
     sceGumMatrixMode(GU_MODEL);
     sceGumLoadIdentity();
     sceGumUpdateMatrix();
 
-    for(int type = 1; type <= 12; type++) {
-        int tileCount = g_tileCount[type];
+    for(int slot = 0; slot < NUM_ENV_TEX; slot++) 
+    {
+        int tileCount = g_tileCount[slot];
         if (tileCount == 0) continue; 
         // uso a displaylist (definida em cima) como memoria temporaria
         VertexTextured* v = (VertexTextured*)sceGuGetMemory(tileCount * 6 * sizeof(VertexTextured));
-        // add msg de erro em caso de falha
+        if (!v) { g_tileCount[slot] = 0; continue; } // prevencao de corrumpcao d memoria
+
         for(int i = 0; i < tileCount; i++) {
-            float x = (float)g_tiles[type][i].x;
-            float z = (float)g_tiles[type][i].z;
-            float y = 0.05f; // p/ 1cm acima do chao
-            VertexTextured * q = &v[i*6];
+            float x = (float)g_tiles[slot][i].x;
+            float z = (float)g_tiles[slot][i].z;
+            float y = 0.05f; // p/ 1cm acima do chao;  evita z-fighting
+            VertexTextured * q = &v[i * 6];
 
             q[0].u =0; 
             q[0].v = 1; 
@@ -185,43 +141,20 @@ void FlushStreetTiles(void) {
             q[5].z = z + 0.5f;
         }
 
-        UseTexturePsp(environment_textures[type]); // bind p N tiles
+        UseTexturePsp(EnvTexture(slot)); // bind p N tiles
         // draw call = scegumdrawaaray (para N tiles)
         sceGumDrawArray(GU_TRIANGLES, GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D, tileCount*6, 0, v);
-        g_tileCount[type] = 0; // limpando a fila p proximo frame
+        
+        g_drawCalls++;
+        g_trisDrawn += tileCount * 2;
+        
+        g_tileCount[slot] = 0; // limpando a fila p proximo frame
     }
     DisableTexturePsp();
 }
 
-// ---------- Helpers de geometria ----------
-static void PushVertex(float x, float y, float z, float nx, float ny, float nz, unsigned int color)
-{
-    if (g_vertCount >= MAX_VERTS) return;
-    VertexColor* v = &g_verts[g_vertCount++];
-    v->color = color;
-    v->nx = nx; v->ny = ny; v->nz = nz;
-    v->x = x; v->y = y; v->z = z;
-}
-
-static void PushQuad(
-    float x0, float y0, float z0,
-    float x1, float y1, float z1,
-    float x2, float y2, float z2,
-    float x3, float y3, float z3,
-    float nx, float ny, float nz,
-    unsigned int color)
-{
-    PushVertex(x0, y0, z0, nx, ny, nz, color);
-    PushVertex(x1, y1, z1, nx, ny, nz, color);
-    PushVertex(x2, y2, z2, nx, ny, nz, color);
-
-    PushVertex(x0, y0, z0, nx, ny, nz, color);
-    PushVertex(x2, y2, z2, nx, ny, nz, color);
-    PushVertex(x3, y3, z3, nx, ny, nz, color);
-}
-
-// ---------------------------------------------------
-u64 g_lastTick = 0;
+//  TIME ---------------------------------------------------
+static u64 g_lastTick = 0;
 
 float GetDeltaTime() 
 {
@@ -234,63 +167,22 @@ float GetDeltaTime()
     return dt;
 }
 
-void FindInitialPosition(float& outX, float& outZ)
-{
-    for(int z = 0; z < mapHeight; z++) {
-        for(int x = 0; x < mapWidth; x++) {
-            if (mapData[z][x] != 0) {
-                outX = (float)x;
-                outZ = (float)z;
-                return;
-            }
-        }
-    }
-    outX = 0.0f;
-    outZ = 0.0f;
-}
-
 void UpdateVehicle(float dt)
 {
-    SceCtrlData pad, oldPad;
+    static SceCtrlData oldPad = { 0 }; // aparentemente, oldPad precisa ser STATIC, o pq n sei.
+    SceCtrlData pad;
     sceCtrlReadBufferPositive(&pad, 1);
 
-    // analogico esquerdo: -128 a 127, centralizado em 0 (offset de 128)
+    unsigned int pressed = pad.Buttons & ~oldPad.Buttons;
+    oldPad = pad;
+
+    if (pressed & PSP_CTRL_SELECT) showHud = !showHud;
+
     float analogX = (float)(pad.Lx - 128) / 128.0f;
 
     const float turnSpeed = 90.0f;    // graus por segundo
     const float maxSpeed  = 4.0f;     // unidades por segundo
     const float accel     = 3.0f;
-
-    // pspDebugScreenSetXY(0, 0);
-    // pspDebugScreenPrintf("pos=(%.1f,%.1f) ang=%.1f spd=%.2f cell=%d   \n",
-    // PosVehicleX, PosVehicleZ, angleVehicle, speedVehicle,
-    // mapData[(int)roundf(PosVehicleZ)][(int)roundf(PosVehicleX)]);
-    unsigned int pressed = pad.Buttons & ~oldPad.Buttons;
-    if (pressed & PSP_CTRL_SELECT) showHud = !showHud;
-    if (showHud) {
-        float budget = 1000.0f / 60.0f;
-        int freeRam = sceKernelTotalFreeMemSize();
-        int cellX = (int)roundf(PosVehicleX), cellZ = (int)roundf(PosVehicleZ);
-        int cellType = (cellX >= 0 && cellX < mapWidth && cellZ >= 0 && cellZ < mapHeight)
-                    ? mapData[cellZ][cellX] : -1;
-
-        pspDebugScreenSetOffset((int)fbp0);
-        pspDebugScreenSetXY(0, 0);
-        pspDebugScreenPrintf("FPS %5.1f  (cpu %4.1f%%  gpu %4.1f%% do frame)\n",
-            g_fps, (g_cpuMs/budget)*100.0f, (g_gpuMs/budget)*100.0f);
-        pspDebugScreenPrintf("cpu %4.2fms  gpu %4.2fms  budget %4.1fms\n",
-            g_cpuMs, g_gpuMs, budget);
-        pspDebugScreenPrintf("RAM livre %4d KB / 24 MB\n", freeRam / 1024);
-        pspDebugScreenPrintf("VRAM livre ~688 KB (calculado, fixo)\n");
-        pspDebugScreenPrintf("clock %3d MHz  bus %3d MHz  bat %3d%%\n",
-            scePowerGetCpuClockFrequency(), scePowerGetBusClockFrequency(),
-            scePowerGetBatteryLifePercent());
-        pspDebugScreenPrintf("draws %3d  tris %5d  verts %5d\n",
-            g_drawCalls, g_trisDrawn, g_vertCount);
-        pspDebugScreenPrintf("pos X=%6.2f Z=%6.2f  cell[%d,%d]=%d\n",
-            PosVehicleX, PosVehicleZ, cellX, cellZ, cellType);
-        pspDebugScreenPrintf("ang %6.1f  vel %5.2f\n", angleVehicle, speedVehicle);
-    }
 
     // vira o carro com o analogico ou D-pad
     if (fabsf(analogX) > 0.2f)
@@ -300,18 +192,15 @@ void UpdateVehicle(float dt)
     if (pad.Buttons & PSP_CTRL_RIGHT) angleVehicle -= turnSpeed * dt;
 
     // acelera com X, freia/re com quadrado
-    if (pad.Buttons & PSP_CTRL_CROSS)
-    {
+    if (pad.Buttons & PSP_CTRL_CROSS) {
         speedVehicle += accel * dt;
         if (speedVehicle > maxSpeed) speedVehicle = maxSpeed;
     }
-    else if (pad.Buttons & PSP_CTRL_SQUARE)
-    {
+    else if (pad.Buttons & PSP_CTRL_SQUARE) {
         speedVehicle -= accel * dt;
         if (speedVehicle < -maxSpeed * 0.5f) speedVehicle = -maxSpeed * 0.5f;
     }
-    else
-    {
+    else {
         // atrito natural, para o carro aos poucos
         if (speedVehicle > 0) speedVehicle = fmaxf(0.0f, speedVehicle - accel * 2.0f * dt);
         else if (speedVehicle < 0) speedVehicle = fminf(0.0f, speedVehicle + accel * 2.0f * dt);
@@ -329,67 +218,60 @@ void UpdateVehicle(float dt)
         int gridZ = (int)roundf(nextZ);
 
         // colisao: so anda se a celula de destino for rua (!=0, na sua convencao atual)
-        if (gridX >= 0 && gridX < mapWidth && gridZ >= 0 && gridZ < mapHeight)
-        {
-            if (mapData[gridZ][gridX] != 0)
-            {
-                PosVehicleX = nextX;
-                PosVehicleZ = nextZ;
-            }
-            else
-            {
-                speedVehicle = 0.0f; // bateu num predio
-            }
-        }
-        else
-        {
-            speedVehicle = 0.0f; // fora do mapa
-        }
+        if (gridX >= 0 && gridX < mapWidth && gridZ >= 0 && gridZ < mapHeight) {
+            if (mapData[gridZ][gridX] != 0) { PosVehicleX = nextX; PosVehicleZ = nextZ; }
+            else { speedVehicle = 0.0f; } // bateu num predio 
+        } else { speedVehicle = 0.0f; } // fora do mapa 
     }
 }
 
+/*
+float GridAdjancey(int x, int z, int seed);
+Identifica a celula vizinha, necessiarmanete pra rotacionar os predios pra rua.
+
+*/
 float GridAdjancey(int x, int z, int seed) {
-    float rotY = 0.0f;
-    bool roadUp = (z > 0) && (mapData[z - 1][x] >= 1 && mapData[z - 1][x] <= 12);
-    bool roadDown = (z < mapHeight - 1) && (mapData[z + 1][x] >= 1 && mapData[z + 1][x] <= 12);
-    bool roadLeft = (x > 0) && (mapData[z][x - 1] >= 1 && mapData[z][x - 1] <= 12);
-    bool roadRight = (x < mapWidth - 1) && (mapData[z][x + 1] >= 1 && mapData[z][x + 1] <= 12);
 
-    // definindo a rotacao em graus apontado pra rua
-    if (roadDown) { rotY = 0.0f; }
-    else if (roadUp) { rotY = 180.0f; }
-    else if (roadRight) { rotY = 90.0f; }
-    else if (roadLeft) { rotY = 270.0f; }
-    else { // se for um predio dentro fodase
-        rotY = (float)((seed % 4)*90);
-    }
-    return rotY;
+    #define IS_ROAD(cx, cz) \
+        ( (cx) >= 0 && (cx) < mapWidth && (cz) >= 0 && (cz) < mapHeight && \
+          mapData[cz][cx] >= 1 && mapData[cz][cx] <= 12 )
+
+    bool roadUp    = IS_ROAD(x,     z - 1);
+    bool roadDown  = IS_ROAD(x,     z + 1);
+    bool roadLeft  = IS_ROAD(x - 1, z);
+    bool roadRight = IS_ROAD(x + 1, z);
+    #undef IS_ROAD
+    // definindo a rotacao em graus apontado pra rua. forward=(sin,cos): a=0 olha +z 
+    if (roadDown) return 0.0f;
+    if (roadUp) return 180.0f;
+    if (roadRight) return 90.0f;
+    if (roadLeft) return 270.0f;
+    return (float)((seed % 4)*90);
 }
 
-void SetupCameraFollowingCar()
+// ============= CAMERA
+/*
+void SetupCamera()
+fovy: O ângulo de visão vertical, em graus.
+aspect: A proporção da tela (largura dividida pela altura).
+near: A distância mínima de renderização (evita que objetos muito próximos cortem a tela).
+far: A distância máxima de renderização (limita até onde a câmera consegue ver).
+
+*/
+void SetupCamera()
 {
     float fov = 60.0f; // quanto menos graus mais perto
-    float far_dist = FAR_DIST;
-    float near_dist = 0.2f;
-    // psp roda a 222MHz por padrao. Da pra forçar.
-    // Isso da aprox 50% de cpu e 66% mais de banda de barramento (antes era 111MHZ).
+    float near_dist = 0.8f;
+
     sceGumMatrixMode(GU_PROJECTION);
     sceGumLoadIdentity();
-    /*
-    fovy: O ângulo de visão vertical, em graus.
-    aspect: A proporção da tela (largura dividida pela altura).
-    near: A distância mínima de renderização (evita que objetos muito próximos cortem a tela).
-    far: A distância máxima de renderização (limita até onde a câmera consegue ver).
-    
-    */
-    sceGumPerspective(fov, 16.0f / 9, near_dist, far_dist);
+    sceGumPerspective(fov, 16.0f / 9.0f, near_dist, FAR_DIST);
 
     sceGumMatrixMode(GU_VIEW);
     sceGumLoadIdentity();
 
     float angleRads = angleVehicle * M_PI / 180.0f;
 
-    // camera fica atras do carro, na direcao oposta ao heading
     g_eye.x = PosVehicleX - sinf(angleRads) * camDist;
     g_eye.y = camHeight;
     g_eye.z = PosVehicleZ - cosf(angleRads) * camDist;
@@ -399,7 +281,6 @@ void SetupCameraFollowingCar()
     g_center.z = PosVehicleZ;
 
     ScePspFVector3 up = { 0.0f, 1.0f, 0.0f };
-
     sceGumLookAt(&g_eye, &g_center, &up);
 
     sceGumMatrixMode(GU_MODEL);
@@ -417,17 +298,16 @@ void DrawVehicle()
         sceGumScale(&scale);
         carModel.desenha();
     sceGumPopMatrix();
+    
+    g_drawCalls++;
+    g_trisDrawn += carModel.getNFaces();
 }
 
 void DrawBuilding(Objeto3D& model, float x, float z, float scale, float rotY)
 {
-    // float offsetX = modelo.getCenterX() * scale;
-    // float offsetZ = modelo.getCenterZ() * scale;
-
-    // ScePspFVector3 pos = { x - offsetX, 0.0f, z - offsetZ};
     ScePspFVector3 pos = { x , 0.0f, z };
     ScePspFVector3 scl = { scale, scale, scale };
-    ScePspFVector3 center = { model.getCenterX(), 0.0f, -model.getCenterZ() };
+    ScePspFVector3 center = { -model.getCenterX(), 0.0f, -model.getCenterZ() };
 
     sceGumPushMatrix();
         sceGumTranslate(&pos);
@@ -436,6 +316,9 @@ void DrawBuilding(Objeto3D& model, float x, float z, float scale, float rotY)
         sceGumTranslate(&center);
         model.desenha();
     sceGumPopMatrix();
+
+    g_drawCalls++;
+    g_trisDrawn += model.getNFaces();
 }
 
 // o predios eh desenhado a cada loop.
@@ -454,19 +337,13 @@ void DrawBuildingsAndStreets(float scaleBuildingA, float scaleBuildingB, float s
     // essa parte é de clamp pra add limites do array
     int x0 = cx - r;
     int x1 = cx + r;
-
     int z0 = cz - r;
     int z1 = cz + r;
 
     if (x0 < 0) x0 = 0;
-    if (x1 >= mapWidth) {
-        x1 = mapWidth - 1;
-    }
-
+    if (x1 >= mapWidth) x1 = mapWidth - 1;
     if (z0 < 0) z0 = 0;
-    if (z1 >= mapHeight) {
-        z1 = mapHeight - 1;
-    }
+    if (z1 >= mapHeight) z1 = mapHeight - 1;
 
     for (int z = z0; z <= z1; z++)
     {
@@ -478,84 +355,77 @@ void DrawBuildingsAndStreets(float scaleBuildingA, float scaleBuildingB, float s
 
             if (d2 > VIEW_RADIUS*VIEW_RADIUS) continue;
             // teste de culling de cone - cria um cone e o que esta dentro é renderizado
-            if (d2 > 4.0f) {
+            if (d2 > NEAR_GUARD) {
                 float inverse = 1.0f / sqrtf(d2); // inverso do versor 1/modulo de d
                 if ((dx*versorFowardDX + dz*versorFowardDZ) * inverse < COS_HALF_FOV) continue;
             }
 
             // desenhando na tela o mapa
-            int coord = mapData[z][x];
-            if (coord == 0) {
+            int cell = mapData[z][x];
+            if (cell == 0) {
+                QueueStreetTile(x, z, MAPCODE_ASPHALT);
                 int seed = (x * 13) + (z * 17);
                 float rotY = GridAdjancey(x, z, seed);
                 int sortedbuildingType = seed % 3;
                 if (sortedbuildingType == 0) DrawBuilding(buildingAModel, x, z, scaleBuildingA, rotY);
                 else if (sortedbuildingType == 1) DrawBuilding(buildingBModel, x, z, scaleBuildingB, rotY);
                 else DrawBuilding(buildingCModel, x, z, scaleBuildingC, rotY);
-            }
-            else if (coord >= 1 && coord <= 12) // eh rua 
-            {
-                QueueStreetTile(x, z, coord);
-            }
+            } else { QueueStreetTile(x, z, cell); }
         }
     }
 }
 
 void DrawGround(void)
 {
-    // Usamos VertexTextured agora para suportar u,v
-    VertexTextured* v = (VertexTextured*)sceGuGetMemory(6 * sizeof(VertexTextured));
-    const float R = VIEW_RADIUS + 4.0f;   // termina onde a nevoa fica opaca
+    struct V { unsigned int c; float x, y, z; };
+    V* v = (V*)sceGuGetMemory(6 * sizeof(V));
+    if (!v) return;
+    const unsigned int color = 0xFF303030;  // MESMA cor do fog e do clear
+    const float R = VIEW_RADIUS + 4.0f;
     const float x0 = PosVehicleX - R, x1 = PosVehicleX + R;
     const float z0 = PosVehicleZ - R, z1 = PosVehicleZ + R;
 
-    // Magia da repetição (Tiling): 
-    // Em vez de esticar 1 textura pro chão inteiro, repetimos ela várias vezes 
-    // para não ficar borrada.
-    float uv_max = R / 2.0f; 
-
-    // u, v, color, x, y, z
-    v[0] = (VertexTextured){0.0f,   0.0f,   0xFFFFFFFF, x0, 0.0f, z0};
-    v[1] = (VertexTextured){uv_max, 0.0f,   0xFFFFFFFF, x1, 0.0f, z0};
-    v[2] = (VertexTextured){uv_max, uv_max, 0xFFFFFFFF, x1, 0.0f, z1};
-    
+    v[0] = (V){color, x0, 0.0f, z0};
+    v[1] = (V){color, x1, 0.0f, z0};
+    v[2] = (V){color, x1, 0.0f, z1};
     v[3] = v[0];
     v[4] = v[2];
-    v[5] = (VertexTextured){0.0f,   uv_max, 0xFFFFFFFF, x0, 0.0f, z1};
+    v[5] = (V){color, x0, 0.0f, z1};
 
-    // 2. ATIVAMOS A TEXTURA DA CALÇADA AQUI!
-    UseTexturePsp(environment_textures[TEX_SIDEWALK]);
-
+    sceGuDisable(GU_TEXTURE_2D);
     sceGumMatrixMode(GU_MODEL);
     sceGumLoadIdentity();
-    
-    // Adicionei a flag GU_TEXTURE_32BITF para o PSP saber ler as coordenadas U e V
-    sceGumDrawArray(GU_TRIANGLES, GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D, 6, 0, v);
-    
-    DisableTexturePsp(); // Limpa o estado da GPU para não bugar o resto
+    sceGumDrawArray(GU_TRIANGLES, GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D, 6, 0, v);
+    sceGuEnable(GU_TEXTURE_2D);  // reabilita pro resto do frame
+    g_drawCalls++;
+    g_trisDrawn += 2;
 }
 
-// void DrawGround(void)
-// {
-//     struct V { unsigned int c; float x, y, z; };
-//     V* v = (V*)sceGuGetMemory(6 * sizeof(V));
-//     const unsigned int C = 0xFF004400;
-//     const float R = VIEW_RADIUS + 4.0f;   // termina onde a nevoa fica opaca
-//     const float x0 = PosVehicleX - R, x1 = PosVehicleX + R;
-//     const float z0 = PosVehicleZ - R, z1 = PosVehicleZ + R;
+static void DrawHud(void)
+{
+    if (!showHud) return;
 
-//     v[0] = (V){C, x0, 0.0f, z0};
-//     v[1] = (V){C, x1, 0.0f, z0};
-//     v[2] = (V){C, x1, 0.0f, z1};
-//     v[3] = v[0];
-//     v[4] = v[2];
-//     v[5] = (V){C, x0, 0.0f, z1};
+    char buf[96];
+    float budget = 1000.0f / 60.0f;   /* 16.67 ms por frame a 60 FPS */
 
-//     sceGuDisable(GU_TEXTURE_2D);
-//     sceGumMatrixMode(GU_MODEL);
-//     sceGumLoadIdentity();
-//     sceGumDrawArray(GU_TRIANGLES, GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D, 6, 0, v);
-// }
+    int cellX = (int)roundf(PosVehicleX);
+    int cellZ = (int)roundf(PosVehicleZ);
+    int cellType = (cellX >= 0 && cellX < mapWidth && cellZ >= 0 && cellZ < mapHeight) ? mapData[cellZ][cellX] : -1;
+    Begin2D();
+    snprintf(buf, sizeof(buf), "FPS %.0f CPU %.0f%% GPU %.0f%%", g_fps, g_cpuMs / budget * 100.0f, g_gpuMs / budget * 100.0f);
+    DrawText2D(buf, 8, 6, 1.0f, 0xFF00FFFF);
+
+    snprintf(buf, sizeof(buf), "RAM %dKB DRAW %d TRI %d", sceKernelTotalFreeMemSize() / 1024, g_drawCalls, g_trisDrawn);
+    DrawText2D(buf, 8, 24, 1.0f, 0xFFFFFFFF);
+
+    snprintf(buf, sizeof(buf), "POS %.1f %.1f CELL %d VEL %.1f",PosVehicleX, PosVehicleZ, cellType, speedVehicle);
+    DrawText2D(buf, 8, 42, 1.0f, 0xFFFFFFFF);
+
+    snprintf(buf, sizeof(buf), "CLK %dMHz BUS %dMHz BAT %d%%", scePowerGetCpuClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetBatteryLifePercent());
+    DrawText2D(buf, 8, 60, 1.0f, 0xFFAAAAAA);
+
+    End2D();
+}
 
 void InitGU()
 {
@@ -608,7 +478,7 @@ void InitGU()
 void DefSpawnPosition(float& outX, float& outZ) {
     for(int z = 1; z < mapHeight - 1; z++) {
         for (int x = 1; x < mapWidth - 1; x++) {
-            if (mapData[z][x] >= 1 && mapData[z][x]) {
+            if (mapData[z][x] >= 1 && mapData[z][x] <= 12) {
                 outX = (float)x;
                 outZ = (float)z;
                 return;
@@ -620,25 +490,31 @@ void DefSpawnPosition(float& outX, float& outZ) {
 }
 
 int main() {
-    float scaleBuildingA, scaleBuildingB, scaleBuildingC;
     scePowerSetClockFrequency(333, 333, 166); // CPU=333, PLL=333, BUS=166
     SetupCallbacks();
 
     InitGU();
     pspDebugScreenInit();
-    InitHUD();
-    LoadAllEnvironmentTextures();
-    // erro real, sem mapa nao ha o que desenhar
-    if (!LoadMap("mapa.txt")) { return 1; }
-    // pspDebugScreenInit();
-    // pspDebugScreenPrintf("mapWidth=%d mapHeight=%d\n", mapWidth, mapHeight);
-
-    //FindInitialPosition(PosVehicleX, PosVehicleZ);
-    DefSpawnPosition(PosVehicleX, PosVehicleZ);
 
     sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
 
+    char msg[64];
+
+    LoadingScreen("Carregando fontes e menu", list, fbp0);
+    InitHUD();
+
+    int nTextures = LoadAllEnvironmentTextures();
+    snprintf(msg, sizeof(msg), "Texturas: %d/%d", nTextures, NUM_ENV_TEX);
+    LoadingScreen(msg, list, fbp0);
+    if (!LoadMap("mapa.txt")) { 
+        LoadingScreen("error: mapa.txt n carregou", list, fbp0);
+        sceKernelDelayThread(3*1000*1000);
+        return 1; 
+    }
+
+    LoadingScreen("loading buildings", list, fbp0);
+    float scaleBuildingA, scaleBuildingB, scaleBuildingC;
     buildingAModel.leObjeto("assets/tri/building-sample-tower-a.tri", 0xFFFFFFFF);
     buildingAModel.carregarTextura("assets/tri/variation-a.raw");
     scaleBuildingA = 1.0f / fmaxf(buildingAModel.getSizeX(), buildingAModel.getSizeZ());
@@ -651,16 +527,21 @@ int main() {
     buildingCModel.carregarTextura("assets/tri/variation-b.raw");
     scaleBuildingC = 1.0f / fmaxf(buildingCModel.getSizeX(), buildingCModel.getSizeZ());
 
-    //pspDebugScreenPrintf("scaleA=%.3f scaleB=%.3f scaleC=%.3f\n", scaleBuildingA, scaleBuildingB, scaleBuildingC);
+    LoadingScreen("loading carro.", list, fbp0);
     carModel.leObjeto("assets/tri/uno_complete.tri", 0xFFFFFFFF);
     carModel.carregarTextura("assets/tri/colormap.raw");
 
-    int state = Menu();
-    if (state == STATE_QUIT) {
+    sceKernelDcacheWritebackInvalidateAll();
+    DefSpawnPosition(PosVehicleX, PosVehicleZ);
+    LoadingScreen("Done.", list, fbp0);
+
+#if !SKIP_MENU
+    if (Menu(list, fbp0) == STATE_QUIT) {
         sceGuTerm();
         sceKernelExitGame();
         return 0;
     }
+#endif
 
     while (1)
     {
@@ -670,18 +551,21 @@ int main() {
         u64 t0, t1, t2;
         float res = (float)sceRtcGetTickResolution();
 
+        g_drawCalls = 0;
+        g_trisDrawn = 0;
+
         sceRtcGetCurrentTick(&t0);
 
         sceGuStart(GU_DIRECT, list);
         sceGuClearColor(0xFF303030);
         sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
 
-        SetupCameraFollowingCar();
+        SetupCamera();
         DrawGround();
-
         DrawBuildingsAndStreets(scaleBuildingA, scaleBuildingB, scaleBuildingC);
         FlushStreetTiles();
         DrawVehicle();
+        DrawHud();
 
         sceGuFinish();
         sceRtcGetCurrentTick(&t1);
@@ -694,16 +578,8 @@ int main() {
         g_gpuMs = (float)(t2-t1)/res*1000.0f;  // gpuMs alto -> é GPU-bound (vértices, texturas, fillrate) -> itens 2, 4, 5.
         ProfilerUpdateFPS();
 
-        int cellX = (int)roundf(PosVehicleX);
-        int cellZ = (int)roundf(PosVehicleZ);
-        int cellType = (cellX >= 0 && cellX < mapWidth && cellZ >= 0 && cellZ < mapHeight)
-                    ? mapData[cellZ][cellX] : -1;
-
         sceDisplayWaitVblankStart();
         fbp0 = sceGuSwapBuffers();
-
-        // sceDisplayWaitVblankStart();
-        // sceGuSwapBuffers();
     }
 
     return 0;
