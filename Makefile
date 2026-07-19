@@ -1,5 +1,5 @@
 TARGET = car
-OBJS = main.o common.o map.o
+OBJS = main.o common.o map.o psptexture.o
 
 INCDIR =
 CFLAGS = -G0 -Wall -O2
@@ -7,10 +7,10 @@ CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti
 ASFLAGS = $(CFLAGS)
 
 LIBDIR =
-LIBS = -lpspgum -lpspgu -lpsprtc -lpsppower -lm -lstdc++
+LIBS = -lpspgum_vfpu -lpspvfpu -lpspgu -lpsprtc -lpsppower -lm -lstdc++
 
 EXTRA_TARGETS = EBOOT.PBP
-PSP_EBOOT_TITLE = CAR TEST
+PSP_EBOOT_TITLE = Car Sandbox Prototype
 
 PSPSDK=$(shell psp-config --pspsdk-path)
 include $(PSPSDK)/lib/build.mak

@@ -2,11 +2,15 @@
 #define COMMON_H
 
 #include <pspkernel.h>
-#include <pspdebug.h>
 #include <pspdisplay.h>
 #include <pspgu.h>
 #include <pspgum.h>
+#include <string.h>
+#include <pspctrl.h>
 #include <psprtc.h>
+#include <psppower.h>
+#include <pspsysmem.h>
+#include <math.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +20,15 @@ extern float g_cpuMs;
 extern float g_gpuMs;
 extern int g_frames;
 extern u64 g_fpsTick;
+
+enum GameState {
+    STATE_MENU,
+    STATE_PLAYING,
+    STATE_QUIT
+};
+
+int Menu(void);
+void LoadingScreen(const char* msg);
 
 void ProfilerUpdateFPS(void);
 void SetupCallbacks(void);

@@ -1,7 +1,7 @@
 #ifndef MAP_H
 #define MAP_H
 
-#define MAP_MAX 64
+#define MAP_MAX 100
 
 extern int mapWidth;
 extern int mapHeight;

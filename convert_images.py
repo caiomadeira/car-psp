@@ -4,7 +4,7 @@ def next_pow2(n):
     p = 1
     while p < n:
         p *= 2
-    return p
+    return min(p, 512)
 
 def convert(path_in, path_out):
     # Lê a imagem
@@ -19,7 +19,11 @@ def convert(path_in, path_out):
 
     if (nw, nh) != (w, h):
         # MAGIA 2: Usa NEAREST para não borrar as cores do seu Atlas!
-        img = img.resize((nw, nh), Image.NEAREST)
+        if w > 512 or h > 512:
+            img = img.resize((nw, nh), Image.LANCZOS)
+        else:
+            # MAGIA 2: Usa NEAREST para não borrar as cores do seu Atlas!
+            img = img.resize((nw, nh), Image.NEAREST)
 
     data = img.tobytes("raw", "RGBA")
 
@@ -38,9 +42,14 @@ if __name__ == "__main__":
 
     # 2. Texturas das ruas (estão soltas na pasta assets/)
     map_textures = [
-        "CROSS", "DL", "DLR", "DR", "LR", "None", 
-        "UD", "UDL", "UDR", "UL", "ULR", "UR"
+        "CROSS.jpg", "DL.png", "DLR.png", "DR.png", "LR.png", "None.png", 
+        "UD.png", "UDL.png", "UDR.png", "UL.png", "ULR.png", "UR.png",
+        "bricks.jpg", "Piso.jpg", "sand.png", "sidewalk_beach.png", "sidewalk.png"
     ]
+    out = ""
     for name in map_textures:
-        # Lê de assets/ e salva o .raw na própria pasta assets/
-        convert(f"assets/{name}.png", f"assets/{name}.raw")
+        if ".png" in name:
+            out = f"assets/tex/{name.replace(".png", "")}.raw"
+        if ".jpg" in name:
+            out = f"assets/tex/{name.replace(".jpg", "")}.raw"
+        convert(f"raw_img/tex/{name}", out)
