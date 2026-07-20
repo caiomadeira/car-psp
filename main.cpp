@@ -10,7 +10,7 @@ PSP_MODULE_INFO("CityMap", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
 PSP_HEAP_SIZE_KB(-256); // -256 = garante tudo menos 256kb ou seja to pegando o maximo possivel
 
-#define SKIP_MENU 0
+#define SKIP_MENU 1
 
 #define FAR_DIST     (VIEW_RADIUS + 10.0f)
 #define VIEW_RADIUS 14.0f
@@ -523,8 +523,8 @@ int main() {
     buildingBModel.carregarTextura("assets/tri/variation-b.raw");
     scaleBuildingB = 1.0f / fmaxf(buildingBModel.getSizeX(), buildingBModel.getSizeZ());
 
-    buildingCModel.leObjeto("assets/tri/building-sample-tower-c.tri", 0xFFFFFFFF);
-    buildingCModel.carregarTextura("assets/tri/variation-b.raw");
+    buildingCModel.leObjeto("assets/tri/house1.tri", 0xFFFFFFFF);
+    buildingCModel.carregarTextura("assets/tex/house_textures.raw");
     scaleBuildingC = 1.0f / fmaxf(buildingCModel.getSizeX(), buildingCModel.getSizeZ());
 
     LoadingScreen("loading carro.", list, fbp0);
