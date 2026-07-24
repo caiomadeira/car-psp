@@ -39,7 +39,7 @@ if __name__ == "__main__":
         "CROSS.jpg", "DL.png", "DLR.png", "DR.png", "LR.png", "None.png",
         "UD.png", "UDL.png", "UDR.png", "UL.png", "ULR.png", "UR.png",
         "bricks.png", "Piso.jpg", "sand.png", "sidewalk_beach.png", "sidewalk.png",
-        "asphalt.png", "house_textures.png"
+        "asphalt.png", "house_textures.png", "props-texture.png", "texture-colors.png", "skyTex.png"
     ]
     for name in map_textures:
         base = name.rsplit(".", 1)[0]

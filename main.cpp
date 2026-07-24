@@ -41,6 +41,9 @@ Objeto3D buildingBModel;
 Objeto3D buildingCModel;
 Objeto3D carModel;
 
+/// ------ texture
+PspTexture skyTex;
+
 // -------- HUD e telemetria 
 static int showHud = 1;
 static int g_drawCalls = 0;
@@ -225,30 +228,44 @@ void UpdateVehicle(float dt)
     }
 }
 
-/*
-float GridAdjancey(int x, int z, int seed);
-Identifica a celula vizinha, necessiarmanete pra rotacionar os predios pra rua.
-
-*/
-float GridAdjancey(int x, int z, int seed) {
-
-    #define IS_ROAD(cx, cz) \
-        ( (cx) >= 0 && (cx) < mapWidth && (cz) >= 0 && (cz) < mapHeight && \
-          mapData[cz][cx] >= 1 && mapData[cz][cx] <= 12 )
-
-    bool roadUp    = IS_ROAD(x,     z - 1);
-    bool roadDown  = IS_ROAD(x,     z + 1);
-    bool roadLeft  = IS_ROAD(x - 1, z);
-    bool roadRight = IS_ROAD(x + 1, z);
-    #undef IS_ROAD
-    // definindo a rotacao em graus apontado pra rua. forward=(sin,cos): a=0 olha +z 
-    if (roadDown) return 0.0f;
-    if (roadUp) return 180.0f;
-    if (roadRight) return 90.0f;
-    if (roadLeft) return 270.0f;
-    return (float)((seed % 4)*90);
+/* Anda na direcao (dx,dz) procurando rua. Atravessa calcada (14), areia (13)
+   e calcada de praia (15). Para se bater em predio (0) ou sair do mapa.
+   Devolve a distancia ate a rua, ou 999 se nao achou. */
+static int DistToRoad(int x, int z, int dx, int dz)
+{
+    const int MAX_LOOK = 4;                 // olha ate 4 celulas
+    for (int d = 1; d <= MAX_LOOK; d++) {
+        int cx = x + dx*d, cz = z + dz*d;
+        if (cx < 0 || cx >= mapWidth || cz < 0 || cz >= mapHeight) return 999;
+        int c = mapData[cz][cx];
+        if (c >= 1 && c <= 12) return d;     // achou a rua
+        if (c == 0)            return 999;   // outro predio bloqueia a vista
+        /* 13/14/15 = piso: continua procurando atras dele */
+    }
+    return 999;
 }
 
+#define FACADE_OFFSET 0.0f    // calibre: 0, 90, 180 ou 270 (ver nota abaixo)
+
+float GridAdjancey(int x, int z, int seed)
+{
+    /* distancia ate a rua em cada direcao */
+    int dDown  = DistToRoad(x, z,  0,  1);   // +z
+    int dRight = DistToRoad(x, z,  1,  0);   // +x
+    int dUp    = DistToRoad(x, z,  0, -1);   // -z
+    int dLeft  = DistToRoad(x, z, -1,  0);   // -x
+
+    /* encara a rua MAIS PROXIMA (nao a primeira do if-chain) */
+    int melhor = dDown;  float rot = 0.0f;
+    if (dRight < melhor) { melhor = dRight; rot = 90.0f;  }
+    if (dUp    < melhor) { melhor = dUp;    rot = 180.0f; }
+    if (dLeft  < melhor) { melhor = dLeft;  rot = 270.0f; }
+
+    if (melhor == 999)                       // miolo de quarteirao, sem saida
+        return (float)((seed % 4) * 90) + FACADE_OFFSET;
+
+    return rot + FACADE_OFFSET;
+}
 // ============= CAMERA
 /*
 void SetupCamera()
@@ -303,9 +320,9 @@ void DrawVehicle()
     g_trisDrawn += carModel.getNFaces();
 }
 
-void DrawBuilding(Objeto3D& model, float x, float z, float scale, float rotY)
+void DrawBuilding(Objeto3D& model, float x, float y, float z, float scale, float rotY)
 {
-    ScePspFVector3 pos = { x , 0.0f, z };
+    ScePspFVector3 pos = { x , y, z };
     ScePspFVector3 scl = { scale, scale, scale };
     ScePspFVector3 center = { -model.getCenterX(), 0.0f, -model.getCenterZ() };
 
@@ -367,9 +384,11 @@ void DrawBuildingsAndStreets(float scaleBuildingA, float scaleBuildingB, float s
                 int seed = (x * 13) + (z * 17);
                 float rotY = GridAdjancey(x, z, seed);
                 int sortedbuildingType = seed % 3;
-                if (sortedbuildingType == 0) DrawBuilding(buildingAModel, x, z, scaleBuildingA, rotY);
-                else if (sortedbuildingType == 1) DrawBuilding(buildingBModel, x, z, scaleBuildingB, rotY);
-                else DrawBuilding(buildingCModel, x, z, scaleBuildingC, rotY);
+                if (sortedbuildingType == 0) {
+                    DrawBuilding(buildingAModel, x, 0.3f, z, scaleBuildingA, rotY);
+                }
+                else if (sortedbuildingType == 1) DrawBuilding(buildingBModel, x, 0.0f, z, scaleBuildingB, rotY);
+                else DrawBuilding(buildingCModel, x, 0.0f, z, scaleBuildingC, rotY);
             } else { QueueStreetTile(x, z, cell); }
         }
     }
@@ -399,6 +418,58 @@ void DrawGround(void)
     sceGuEnable(GU_TEXTURE_2D);  // reabilita pro resto do frame
     g_drawCalls++;
     g_trisDrawn += 2;
+}
+
+void DrawSkybox(void)
+{
+    sceGuDisable(GU_DEPTH_TEST);    // ceu esta sempre atras de tudo
+    sceGuDisable(GU_FOG);           // a nevoa comeria o proprio ceu
+    sceGuDisable(GU_CULL_FACE);     // vemos o cubo por DENTRO
+
+    struct VSky { float u, v; float x, y, z; };
+    VSky* v = (VSky*)sceGuGetMemory(6 * 6 * sizeof(VSky));
+    if (!v) { sceGuEnable(GU_DEPTH_TEST); sceGuEnable(GU_FOG);
+              sceGuEnable(GU_CULL_FACE); return; }
+
+    const float S = 10.0f;   // tamanho arbitrario: sem depth test, so a direcao importa
+    int i = 0;
+    #define VTX(uu,vv,xx,yy,zz) v[i++] = (VSky){uu,vv,xx*S,yy*S,zz*S}
+    /* frente (-z) */
+    VTX(0,0,-1, 1,-1); VTX(1,0, 1, 1,-1); VTX(1,1, 1,-1,-1);
+    VTX(0,0,-1, 1,-1); VTX(1,1, 1,-1,-1); VTX(0,1,-1,-1,-1);
+    /* tras (+z) */
+    VTX(0,0, 1, 1, 1); VTX(1,0,-1, 1, 1); VTX(1,1,-1,-1, 1);
+    VTX(0,0, 1, 1, 1); VTX(1,1,-1,-1, 1); VTX(0,1, 1,-1, 1);
+    /* esquerda (-x) */
+    VTX(0,0,-1, 1, 1); VTX(1,0,-1, 1,-1); VTX(1,1,-1,-1,-1);
+    VTX(0,0,-1, 1, 1); VTX(1,1,-1,-1,-1); VTX(0,1,-1,-1, 1);
+    /* direita (+x) */
+    VTX(0,0, 1, 1,-1); VTX(1,0, 1, 1, 1); VTX(1,1, 1,-1, 1);
+    VTX(0,0, 1, 1,-1); VTX(1,1, 1,-1, 1); VTX(0,1, 1,-1,-1);
+    /* topo (+y) */
+    VTX(0,0,-1, 1, 1); VTX(1,0, 1, 1, 1); VTX(1,1, 1, 1,-1);
+    VTX(0,0,-1, 1, 1); VTX(1,1, 1, 1,-1); VTX(0,1,-1, 1,-1);
+    /* base (-y): o chao cobre, mas evita buraco se a camera inclinar */
+    VTX(0,0,-1,-1,-1); VTX(1,0, 1,-1,-1); VTX(1,1, 1,-1, 1);
+    VTX(0,0,-1,-1,-1); VTX(1,1, 1,-1, 1); VTX(0,1,-1,-1, 1);
+    #undef VTX
+
+    /* o cubo acompanha o olho: o ceu nunca "chega mais perto" */
+    sceGumMatrixMode(GU_MODEL);
+    sceGumLoadIdentity();
+    ScePspFVector3 p = { g_eye.x, g_eye.y, g_eye.z };
+    sceGumTranslate(&p);
+
+    UseTexturePsp(skyTex);
+    sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+    sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+    sceGumDrawArray(GU_TRIANGLES,
+        GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_3D, 36, 0, v);
+
+    sceGuTexWrap(GU_REPEAT, GU_REPEAT);
+    sceGuEnable(GU_CULL_FACE);
+    sceGuEnable(GU_FOG);
+    sceGuEnable(GU_DEPTH_TEST);
 }
 
 static void DrawHud(void)
@@ -513,14 +584,19 @@ int main() {
         return 1; 
     }
 
+    LoadingScreen("sky..", list, fbp0);
+    if (!LoadTexturePsp("assets/tex/skyTex.raw", skyTex, false)) {
+        LoadingScreen("error: skyTex.raw nao carregou", list, fbp0);
+        return 1;
+    }
     LoadingScreen("loading buildings", list, fbp0);
     float scaleBuildingA, scaleBuildingB, scaleBuildingC;
-    buildingAModel.leObjeto("assets/tri/building-sample-tower-a.tri", 0xFFFFFFFF);
-    buildingAModel.carregarTextura("assets/tri/variation-a.raw");
+    buildingAModel.leObjeto("assets/tri/house3.tri", 0xFFF3FF56);
+    buildingAModel.carregarTextura("assets/tex/texture-colors.raw");
     scaleBuildingA = 1.0f / fmaxf(buildingAModel.getSizeX(), buildingAModel.getSizeZ());
 
-    buildingBModel.leObjeto("assets/tri/building-sample-tower-b.tri", 0xFFFFFFFF);
-    buildingBModel.carregarTextura("assets/tri/variation-b.raw");
+    buildingBModel.leObjeto("assets/tri/house2.tri", 0xFFFFFFFF);
+    buildingBModel.carregarTextura("assets/tex/house_textures.raw");
     scaleBuildingB = 1.0f / fmaxf(buildingBModel.getSizeX(), buildingBModel.getSizeZ());
 
     buildingCModel.leObjeto("assets/tri/house1.tri", 0xFFFFFFFF);
@@ -561,6 +637,7 @@ int main() {
         sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
 
         SetupCamera();
+        DrawSkybox();
         DrawGround();
         DrawBuildingsAndStreets(scaleBuildingA, scaleBuildingB, scaleBuildingC);
         FlushStreetTiles();
