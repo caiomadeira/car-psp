@@ -50,7 +50,6 @@ int Menu(void* list, void*& fbp0)
         sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
         Begin2D();
         DrawFullScreen(bgTex);
-
         DrawText2D("Car Game Psp", 150, 60, 3.0f, 0xFFFFFFFF);
 
 

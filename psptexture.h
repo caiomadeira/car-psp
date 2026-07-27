@@ -11,27 +11,18 @@ struct TexDef {
 };
 
 static const TexDef TEX_TABLE[] = {
-    {  1, "CROSS",          true },
-    {  2, "DL",             true },
-    {  3, "DLR",            true },
-    {  4, "DR",             true },
-    {  5, "LR",             true },
-    {  7, "UD",             true },
-    {  8, "UDL",            true },
-    {  9, "UDR",            true },
-    { 10, "UL",             true },
-    { 11, "ULR",            true },
-    { 12, "UR",             true },
+    {  0, "concret1",          true },
+    {  1, "concret1",             true },
+    {  2, "concret3",             true },
     { 13, "sand",           true },
-    { 14, "sidewalk",       true },
+    { 14, "concret2",       true }, //sidewalk
     { 15, "sidewalk_beach", true },
-    { 16, "asphalt",        true },
 };
 
 #define NUM_ENV_TEX (int)(sizeof(TEX_TABLE)/sizeof(TEX_TABLE[0]))
 #define MAX_MAP_CODE 64 //maior mapcode possivel acima disso os indices adicionados sao tratados como invalidos (-1)
 
-#define MAPCODE_ASPHALT 16 // p ser usado sem percorrer o enum
+#define MAPCODE_CONCRETE_DEFAULT 0 // p ser usado sem percorrer o enum
 
 // carrega todas as texturas da tabela, chama uma vez no loading
 int LoadAllEnvironmentTextures();

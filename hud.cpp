@@ -36,8 +36,8 @@ void DrawFullScreen(const PspTexture& tex) {
 
     UseTexturePsp(tex);
     sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
-    sceGumDrawArray(GU_SPRITES,
-        GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_3D, 2, 0, v);
+    sceGumDrawArray(GU_SPRITES, GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_3D, 2, 0, v);
+    InvalidateTexCache();
 }
 
 float DrawChar(char c, float px, float py, float scale, unsigned int color)

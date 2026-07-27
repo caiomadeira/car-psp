@@ -31,16 +31,16 @@ def convert(path_in, path_out):
     print(f"{path_in} -> {path_out} ({nw}x{nh}, original {w}x{h})")
 
 if __name__ == "__main__":
-    model_textures = ["colormap", "variation-a", "variation-b"]
-    for name in model_textures:
-        convert(f"assets/tri/{name}.png", f"assets/tri/{name}.raw")
+    # model_textures = ["colormap", "variation-a", "variation-b"]
+    # for name in model_textures:
+    #     convert(f"../assets/tri/{name}.png", f"../assets/tri/{name}.raw")
 
-    map_textures = [
-        "CROSS.jpg", "DL.png", "DLR.png", "DR.png", "LR.png", "None.png",
-        "UD.png", "UDL.png", "UDR.png", "UL.png", "ULR.png", "UR.png",
-        "bricks.png", "Piso.jpg", "sand.png", "sidewalk_beach.png", "sidewalk.png",
-        "asphalt.png", "house_textures.png", "props-texture.png", "texture-colors.png", "skyTex.png"
-    ]
+    # map_textures = [
+    #     "sand.png", "sidewalk_beach.png", "sidewalk.png", "concret1.png", "concret2.png", "concret3.png",
+    #     "asphalt.png", "house_textures.png", "props-texture.png", "texture-colors.png",
+    #     "skyTex.png", "brush1.png", "palm_tree.png", "tree1.png", "mountain.png"
+    # ]
+    map_textures = ["mountain"]
     for name in map_textures:
         base = name.rsplit(".", 1)[0]
-        convert(f"raw_img/tex/{name}", f"assets/tex/{base}.raw")
+        convert(f"raw_img/tex/{name}.png", f"assets/tex/{name}.raw")

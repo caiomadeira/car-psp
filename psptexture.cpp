@@ -5,6 +5,7 @@
 static PspTexture textures[NUM_ENV_TEX];
 static int mapCodeToSlot[MAX_MAP_CODE + 1];
 static bool loaded[NUM_ENV_TEX];
+const PspTexture* g_boundTex = NULL;
 
 int LoadAllEnvironmentTextures() {
     int success = 0;
@@ -24,7 +25,7 @@ int LoadAllEnvironmentTextures() {
         loaded[slot] = LoadTexturePsp(path, textures[slot], def.mipmap);
         if (loaded[slot]) {
             success++;
-            if (def.mapCode >= 1 && def.mapCode <= MAX_MAP_CODE) {
+            if (def.mapCode >= 0 && def.mapCode <= MAX_MAP_CODE) {
                 mapCodeToSlot[def.mapCode] = slot;
             } else {
                 printf("TEX_TABLE[%d]: mapCode %d fora de 1..%d, ignorado\n",

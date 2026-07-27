@@ -57,6 +57,7 @@ public:
     float getSizeZ() { return maxZ - minZ; }
     float getCenterX() { return (minX + maxX) * 0.5f; }
     float getCenterZ() { return (minZ + maxZ) * 0.5f; }
+    float getMinY() { return minY; }
 
     bool carregarTextura(const char* arquivoRaw)
     {
@@ -157,8 +158,6 @@ public:
         UseTexturePsp(textura);
         int vtype = GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_NORMAL_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_3D;
         sceGumDrawArray(GU_TRIANGLES, vtype, nFaces * 3, NULL, verts);
-        DisableTexturePsp();
-
         sceGuEnable(GU_CULL_FACE);    // reabilita pro resto (chao, etc)
     }
 };

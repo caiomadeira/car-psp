@@ -5,6 +5,7 @@
 #include "hud.h"
 #include "psptexture.h"
 #include "screen.h"
+#include "props.h"
 
 PSP_MODULE_INFO("CityMap", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
@@ -46,8 +47,9 @@ PspTexture skyTex;
 
 // -------- HUD e telemetria 
 static int showHud = 1;
-static int g_drawCalls = 0;
-static int g_trisDrawn = 0;
+static int showPivot = 0; 
+int g_drawCalls = 0;
+int g_trisDrawn = 0;
 
 // ----- filas baching pra textura
 // short chega ate 32767. Ele usa 16 bits de memoria (2 bytes (x = 2 bytes e z = 2 bytes; total = 4 bytes)) com range [-32767, 32767]
@@ -64,6 +66,13 @@ struct VertexTextured {
     unsigned int color;
     float x, y, z;
 };
+
+static void DrawSky(void)
+{
+    Begin2D();
+    DrawFullScreen(skyTex);
+    End2D();
+}
 
 /*
 static void QueueStreetTile(int x, int z, int mapCode)
@@ -180,6 +189,7 @@ void UpdateVehicle(float dt)
     oldPad = pad;
 
     if (pressed & PSP_CTRL_SELECT) showHud = !showHud;
+    if (pressed & PSP_CTRL_TRIANGLE) showPivot = !showPivot;
 
     float analogX = (float)(pad.Lx - 128) / 128.0f;
 
@@ -380,7 +390,7 @@ void DrawBuildingsAndStreets(float scaleBuildingA, float scaleBuildingB, float s
             // desenhando na tela o mapa
             int cell = mapData[z][x];
             if (cell == 0) {
-                QueueStreetTile(x, z, MAPCODE_ASPHALT);
+                QueueStreetTile(x, z, MAPCODE_CONCRETE_DEFAULT);
                 int seed = (x * 13) + (z * 17);
                 float rotY = GridAdjancey(x, z, seed);
                 int sortedbuildingType = seed % 3;
@@ -389,7 +399,9 @@ void DrawBuildingsAndStreets(float scaleBuildingA, float scaleBuildingB, float s
                 }
                 else if (sortedbuildingType == 1) DrawBuilding(buildingBModel, x, 0.0f, z, scaleBuildingB, rotY);
                 else DrawBuilding(buildingCModel, x, 0.0f, z, scaleBuildingC, rotY);
-            } else { QueueStreetTile(x, z, cell); }
+            }  
+            else if (cell == -1) { QueueStreetTile(x, z, MAPCODE_CONCRETE_DEFAULT); }
+            else { QueueStreetTile(x, z, cell); }
         }
     }
 }
@@ -420,58 +432,6 @@ void DrawGround(void)
     g_trisDrawn += 2;
 }
 
-void DrawSkybox(void)
-{
-    sceGuDisable(GU_DEPTH_TEST);    // ceu esta sempre atras de tudo
-    sceGuDisable(GU_FOG);           // a nevoa comeria o proprio ceu
-    sceGuDisable(GU_CULL_FACE);     // vemos o cubo por DENTRO
-
-    struct VSky { float u, v; float x, y, z; };
-    VSky* v = (VSky*)sceGuGetMemory(6 * 6 * sizeof(VSky));
-    if (!v) { sceGuEnable(GU_DEPTH_TEST); sceGuEnable(GU_FOG);
-              sceGuEnable(GU_CULL_FACE); return; }
-
-    const float S = 10.0f;   // tamanho arbitrario: sem depth test, so a direcao importa
-    int i = 0;
-    #define VTX(uu,vv,xx,yy,zz) v[i++] = (VSky){uu,vv,xx*S,yy*S,zz*S}
-    /* frente (-z) */
-    VTX(0,0,-1, 1,-1); VTX(1,0, 1, 1,-1); VTX(1,1, 1,-1,-1);
-    VTX(0,0,-1, 1,-1); VTX(1,1, 1,-1,-1); VTX(0,1,-1,-1,-1);
-    /* tras (+z) */
-    VTX(0,0, 1, 1, 1); VTX(1,0,-1, 1, 1); VTX(1,1,-1,-1, 1);
-    VTX(0,0, 1, 1, 1); VTX(1,1,-1,-1, 1); VTX(0,1, 1,-1, 1);
-    /* esquerda (-x) */
-    VTX(0,0,-1, 1, 1); VTX(1,0,-1, 1,-1); VTX(1,1,-1,-1,-1);
-    VTX(0,0,-1, 1, 1); VTX(1,1,-1,-1,-1); VTX(0,1,-1,-1, 1);
-    /* direita (+x) */
-    VTX(0,0, 1, 1,-1); VTX(1,0, 1, 1, 1); VTX(1,1, 1,-1, 1);
-    VTX(0,0, 1, 1,-1); VTX(1,1, 1,-1, 1); VTX(0,1, 1,-1,-1);
-    /* topo (+y) */
-    VTX(0,0,-1, 1, 1); VTX(1,0, 1, 1, 1); VTX(1,1, 1, 1,-1);
-    VTX(0,0,-1, 1, 1); VTX(1,1, 1, 1,-1); VTX(0,1,-1, 1,-1);
-    /* base (-y): o chao cobre, mas evita buraco se a camera inclinar */
-    VTX(0,0,-1,-1,-1); VTX(1,0, 1,-1,-1); VTX(1,1, 1,-1, 1);
-    VTX(0,0,-1,-1,-1); VTX(1,1, 1,-1, 1); VTX(0,1,-1,-1, 1);
-    #undef VTX
-
-    /* o cubo acompanha o olho: o ceu nunca "chega mais perto" */
-    sceGumMatrixMode(GU_MODEL);
-    sceGumLoadIdentity();
-    ScePspFVector3 p = { g_eye.x, g_eye.y, g_eye.z };
-    sceGumTranslate(&p);
-
-    UseTexturePsp(skyTex);
-    sceGuTexWrap(GU_CLAMP, GU_CLAMP);
-    sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
-    sceGumDrawArray(GU_TRIANGLES,
-        GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_3D, 36, 0, v);
-
-    sceGuTexWrap(GU_REPEAT, GU_REPEAT);
-    sceGuEnable(GU_CULL_FACE);
-    sceGuEnable(GU_FOG);
-    sceGuEnable(GU_DEPTH_TEST);
-}
-
 static void DrawHud(void)
 {
     if (!showHud) return;
@@ -494,6 +454,17 @@ static void DrawHud(void)
 
     snprintf(buf, sizeof(buf), "CLK %dMHz BUS %dMHz BAT %d%%", scePowerGetCpuClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetBatteryLifePercent());
     DrawText2D(buf, 8, 60, 1.0f, 0xFFAAAAAA);
+
+    if (showPivot) {
+        char b[96];
+        DrawText2D("PIVO DOS PROPS (triangulo p/ fechar)", 8, 96, 1.0f, 0xFF00FF00);
+        for (int i = 0; i < PROP_COUNT; i++) {
+            snprintf(b, sizeof(b), "%d %s cx%+.2f cz%+.2f sx%.2f",
+                    i, g_propOk[i] ? "ok " : "ERR",
+                    g_propPivotX[i], g_propPivotZ[i], g_propSizeX[i]);
+            DrawText2D(b, 8, 112 + i * 14, 0.8f, 0xFFFFFFFF);
+        }
+    }
 
     End2D();
 }
@@ -537,8 +508,8 @@ void InitGU()
     0xFF303030 usei pois a cor do FOG tem que ser a cor do céu também.
     */
    sceGuEnable(GU_FOG);
-   sceGuFog(7.0f, VIEW_RADIUS, 0xFF303030);
-
+   //sceGuFog(7.0f, VIEW_RADIUS, 0xFF303030);
+    sceGuFog(10.0f, 28.0f, 0xFF303030); 
     sceGuFinish();
     sceGuSync(0, 0);
 
@@ -558,6 +529,25 @@ void DefSpawnPosition(float& outX, float& outZ) {
     }
     outX = mapWidth * 0.5f;
     outZ = mapHeight * 0.5f;
+}
+
+void LoadModels(float& scaleBuildingA, float& scaleBuildingB, float& scaleBuildingC) 
+{
+    buildingAModel.leObjeto("assets/tri/house3.tri", 0xFFFFFFFF);
+    buildingAModel.carregarTextura("assets/tex/texture-colors.raw");
+    scaleBuildingA = 1.0f / fmaxf(buildingAModel.getSizeX(), buildingAModel.getSizeZ());
+
+    buildingBModel.leObjeto("assets/tri/house2.tri", 0xFFFFFFFF);
+    buildingBModel.carregarTextura("assets/tex/house_textures.raw");
+    scaleBuildingB = 1.0f / fmaxf(buildingBModel.getSizeX(), buildingBModel.getSizeZ());
+
+    buildingCModel.leObjeto("assets/tri/house1.tri", 0xFFFFFFFF);
+    buildingCModel.carregarTextura("assets/tex/house_textures.raw");
+    scaleBuildingC = 1.0f / fmaxf(buildingCModel.getSizeX(), buildingCModel.getSizeZ());
+
+    LoadingScreen("loading carro.", list, fbp0);
+    carModel.leObjeto("assets/tri/uno_complete.tri", 0xFFFFFFFF);
+    carModel.carregarTextura("assets/tex/colormap.raw");
 }
 
 int main() {
@@ -584,6 +574,30 @@ int main() {
         return 1; 
     }
 
+    LoadWallTexture();
+    BuildBorderWall();
+    LoadingScreen("Props", list, fbp0);
+    LoadBackdrop();
+    LoadPropModels();
+    ClearProps();
+
+    // props adicionados a mao
+    // void PopulatePropsOnTile(int tileTag, int propTag, int spacing, float side)
+    PopulatePropsOnTile(14, PROP_POST_LIGHT, 6,  +1.0f); 
+    PopulatePropsOnTile(14, PROP_NEWSSTAND, 40, -1.0f);
+    PopulatePropsOnTile(14, PROP_CHURRO_CAR, 20, +1.0f);
+    //PopulatePropsOnTile(14, PROP_OUTDOOR_1, 1, -1.0f);
+    // PopulatePropsOnTile(14, PROP_OUTDOOR_2, 1, -1.0f);
+
+    // void AddProp(int cellx, int cellz, int model, float ox, float oz, float rotDegree)
+    AddProp(22, 14, PROP_OUTDOOR_1, 0.0f, -0.45f, 0.0f);
+    AddProp(8, 27, PROP_OUTDOOR_2, 0.42f, 0.0f, 90.0f);
+    AddProp(5, 5, PROP_STREET_MENU, 0.42f, 0.0f, 90.0f);
+
+
+    PopulateScatter(13, PROP_TREE_1, 5, 4242u);
+    PopulateScatter(13, PROP_BUSH_1, 3, 777u);
+
     LoadingScreen("sky..", list, fbp0);
     if (!LoadTexturePsp("assets/tex/skyTex.raw", skyTex, false)) {
         LoadingScreen("error: skyTex.raw nao carregou", list, fbp0);
@@ -591,21 +605,7 @@ int main() {
     }
     LoadingScreen("loading buildings", list, fbp0);
     float scaleBuildingA, scaleBuildingB, scaleBuildingC;
-    buildingAModel.leObjeto("assets/tri/house3.tri", 0xFFF3FF56);
-    buildingAModel.carregarTextura("assets/tex/texture-colors.raw");
-    scaleBuildingA = 1.0f / fmaxf(buildingAModel.getSizeX(), buildingAModel.getSizeZ());
-
-    buildingBModel.leObjeto("assets/tri/house2.tri", 0xFFFFFFFF);
-    buildingBModel.carregarTextura("assets/tex/house_textures.raw");
-    scaleBuildingB = 1.0f / fmaxf(buildingBModel.getSizeX(), buildingBModel.getSizeZ());
-
-    buildingCModel.leObjeto("assets/tri/house1.tri", 0xFFFFFFFF);
-    buildingCModel.carregarTextura("assets/tex/house_textures.raw");
-    scaleBuildingC = 1.0f / fmaxf(buildingCModel.getSizeX(), buildingCModel.getSizeZ());
-
-    LoadingScreen("loading carro.", list, fbp0);
-    carModel.leObjeto("assets/tri/uno_complete.tri", 0xFFFFFFFF);
-    carModel.carregarTextura("assets/tri/colormap.raw");
+    LoadModels(scaleBuildingA, scaleBuildingB, scaleBuildingC);
 
     sceKernelDcacheWritebackInvalidateAll();
     DefSpawnPosition(PosVehicleX, PosVehicleZ);
@@ -635,12 +635,16 @@ int main() {
         sceGuStart(GU_DIRECT, list);
         sceGuClearColor(0xFF303030);
         sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
-
+        DrawSky();
+        Begin2D();
+        DrawBackdrop(angleVehicle);
+        End2D();
         SetupCamera();
-        DrawSkybox();
         DrawGround();
+        DrawBorderWall();
         DrawBuildingsAndStreets(scaleBuildingA, scaleBuildingB, scaleBuildingC);
         FlushStreetTiles();
+        DrawProps();
         DrawVehicle();
         DrawHud();
 

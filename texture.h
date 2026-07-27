@@ -21,6 +21,8 @@ struct PspTexture
     int nLevels;
 };
 
+extern const PspTexture* g_boundTex;
+
 static void GenerateMipmaps(PspTexture& tex) {
     int w = tex.width;
     int h = tex.height;
@@ -89,6 +91,9 @@ inline bool LoadTexturePsp(const char* filename, PspTexture& tex, bool comMipmap
 // Ativa a textura pra ser usada no proximo desenho
 inline void UseTexturePsp(const PspTexture& tex)
 {
+    if (tex.nLevels <= 0 || tex.data[0] == NULL) return;   // nao carregou
+    if (&tex == g_boundTex) return;
+    g_boundTex = &tex;
     sceGuEnable(GU_TEXTURE_2D);
 
     sceGuTexMode(GU_PSM_8888, tex.nLevels - 1, 0, 0);
@@ -108,11 +113,14 @@ inline void UseTexturePsp(const PspTexture& tex)
     sceGuAlphaFunc(GU_GREATER, 0, 0xff);
 }
 
-inline void DisableTexturePsp()
-{
+inline void DisableTexturePsp() {
     sceGuDisable(GU_TEXTURE_2D);
     sceGuDisable(GU_ALPHA_TEST);
+    g_boundTex = NULL;
 }
+
+inline void InvalidateTexCache() { g_boundTex = NULL; }
+
 
 inline void CriarTexturaBranca(PspTexture& tex){
     tex.width = 2;
