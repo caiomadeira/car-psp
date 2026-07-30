@@ -161,12 +161,11 @@ void ClearProps(void) { propCount = 0; }
 
 void AddProp(int cellx, int cellz, int model, float ox, float oz, float rotDegree)
 {
-    if (propCount >= MAX_PROPS)
-        return;
-    
-    if (model < 0 || model >= PROP_COUNT)
-        return;
-    
+    if (propCount >= MAX_PROPS) return;
+    if (model < 0 || model >= PROP_COUNT) return;
+    // recusa celula fora do mapa
+    if (cellx < 0 || cellx >= mapWidth || cellz < 0 || cellz >= mapHeight) return;
+    if (mapData[cellx][cellz] == 0 || mapData[cellx][cellz] == 1 || mapData[cellx][cellz] == -1) return; 
     PropInstance* p = &props[propCount++];
     p->cellX = (short)cellx;
     p->cellZ = (short)cellz;
@@ -390,7 +389,7 @@ void DrawProps(void)
    ========================================================================= */
 #define BACKDROP_REPEAT   2.0f    /* quantas vezes a textura cabe numa volta */
 #define BACKDROP_TOP      0.0f    /* topo do fundo, em pixels de tela */
-#define BACKDROP_BOTTOM 150.0f    /* onde termina (o chao 3D cobre abaixo) */
+#define BACKDROP_BOTTOM 272.0f    /* onde termina (o chao 3D cobre abaixo) */
 
 void LoadBackdrop(void)
 {

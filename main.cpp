@@ -31,6 +31,7 @@ float speedVehicle = 0.0f;
 float camDist = 1.2f;
 float camHeight = 0.6f;
 ScePspFVector3 g_eye, g_center;
+#define CAMERA_MARGIN 1.0f
 
 // --------- GPU
 unsigned int __attribute__((aligned(16))) list[262144];
@@ -66,6 +67,10 @@ struct VertexTextured {
     unsigned int color;
     float x, y, z;
 };
+
+// prototype ----------
+float CameraDistanceClamped(float baseDist, float angleRads);
+// --------------------
 
 static void DrawSky(void)
 {
@@ -121,36 +126,15 @@ void FlushStreetTiles(void)
             float y = 0.05f; // p/ 1cm acima do chao;  evita z-fighting
             VertexTextured * q = &v[i * 6];
 
-            q[0].u =0; 
-            q[0].v = 1; 
-            q[0].color = 0xFFFFFFFF; 
-            q[0].x = x - 0.5f; 
-            q[0].y = y; 
-            q[0].z = z - 0.5f;
-            
-            q[1].u = 1; 
-            q[1].v = 1; 
-            q[1].color = 0xFFFFFFFF; 
-            q[1].x = x + 0.5f; 
-            q[1].y = y; 
-            q[1].z = z - 0.5f;
+            /* triangulo 1: canto SE -> NE -> SD  (agora CCW visto de cima) */
+            q[0].u=0; q[0].v=1; q[0].color=0xFFFFFFFF; q[0].x=x-0.5f; q[0].y=y; q[0].z=z-0.5f;
+            q[1].u=1; q[1].v=0; q[1].color=0xFFFFFFFF; q[1].x=x+0.5f; q[1].y=y; q[1].z=z+0.5f;
+            q[2].u=1; q[2].v=1; q[2].color=0xFFFFFFFF; q[2].x=x+0.5f; q[2].y=y; q[2].z=z-0.5f;
 
-            q[2].u = 1; 
-            q[2].v = 0; 
-            q[2].color = 0xFFFFFFFF; 
-            q[2].x = x + 0.5f; 
-            q[2].y = y; 
-            q[2].z = z + 0.5f;
-
-            q[3] = q[0];
-            q[4] = q[2];
-            
-            q[5].u = 0; 
-            q[5].v = 0; 
-            q[5].color = 0xFFFFFFFF; 
-            q[5].x = x - 0.5f; 
-            q[5].y = y; 
-            q[5].z = z + 0.5f;
+            /* triangulo 2 */
+            q[3].u=0; q[3].v=1; q[3].color=0xFFFFFFFF; q[3].x=x-0.5f; q[3].y=y; q[3].z=z-0.5f;
+            q[4].u=0; q[4].v=0; q[4].color=0xFFFFFFFF; q[4].x=x-0.5f; q[4].y=y; q[4].z=z+0.5f;
+            q[5].u=1; q[5].v=0; q[5].color=0xFFFFFFFF; q[5].x=x+0.5f; q[5].y=y; q[5].z=z+0.5f;
         }
 
         UseTexturePsp(EnvTexture(slot)); // bind p N tiles
@@ -285,7 +269,7 @@ near: A distância mínima de renderização (evita que objetos muito próximos 
 far: A distância máxima de renderização (limita até onde a câmera consegue ver).
 
 */
-void SetupCamera()
+void SetupCamera(float dt)
 {
     float fov = 60.0f; // quanto menos graus mais perto
     float near_dist = 0.8f;
@@ -299,9 +283,16 @@ void SetupCamera()
 
     float angleRads = angleVehicle * M_PI / 180.0f;
 
-    g_eye.x = PosVehicleX - sinf(angleRads) * camDist;
+    static float camDistSuave = 0.0f;
+    if (camDistSuave == 0.0f) camDistSuave = camDist;
+
+    float alvo = CameraDistanceClamped(camDist, angleRads);
+    float taxa = (alvo < camDistSuave) ? 25.0f : 3.0f;
+    camDistSuave += (alvo - camDistSuave) * (1.0f - expf(-dt * taxa));
+
+    g_eye.x = PosVehicleX - sinf(angleRads) * camDistSuave;
     g_eye.y = camHeight;
-    g_eye.z = PosVehicleZ - cosf(angleRads) * camDist;
+    g_eye.z = PosVehicleZ - cosf(angleRads) * camDistSuave;
 
     g_center.x = PosVehicleX;
     g_center.y = 0.5f;
@@ -312,6 +303,25 @@ void SetupCamera()
 
     sceGumMatrixMode(GU_MODEL);
     sceGumLoadIdentity();
+}
+
+
+float CameraDistanceClamped(float baseDist, float angleRads) 
+{
+    const float step = 0.15f;
+    const float minimumDistance = 0.35f;
+
+    for(float dist = step; dist <= baseDist; dist += step) {
+        float sx = PosVehicleX - sinf(angleRads) * dist;
+        float sz = PosVehicleZ - cosf(angleRads) * dist;
+        int gx = (int)roundf(sx), gz = (int)roundf(sz);
+
+        bool blocked = (gx < 0 || gx >= mapWidth || gz < 0 || gz >= mapHeight) || (mapData[gz][gx] == 0);
+        if (blocked) {
+            return fmaxf(minimumDistance, dist - CAMERA_MARGIN);
+        }
+    }
+    return baseDist;
 }
 
 void DrawVehicle()
@@ -332,7 +342,8 @@ void DrawVehicle()
 
 void DrawBuilding(Objeto3D& model, float x, float y, float z, float scale, float rotY)
 {
-    ScePspFVector3 pos = { x , y, z };
+    float liftY = -model.getMinY() * scale;
+    ScePspFVector3 pos = { x, liftY, z };
     ScePspFVector3 scl = { scale, scale, scale };
     ScePspFVector3 center = { -model.getCenterX(), 0.0f, -model.getCenterZ() };
 
@@ -395,7 +406,7 @@ void DrawBuildingsAndStreets(float scaleBuildingA, float scaleBuildingB, float s
                 float rotY = GridAdjancey(x, z, seed);
                 int sortedbuildingType = seed % 3;
                 if (sortedbuildingType == 0) {
-                    DrawBuilding(buildingAModel, x, 0.3f, z, scaleBuildingA, rotY);
+                    DrawBuilding(buildingAModel, x, 0.0f, z, scaleBuildingA, rotY);
                 }
                 else if (sortedbuildingType == 1) DrawBuilding(buildingBModel, x, 0.0f, z, scaleBuildingB, rotY);
                 else DrawBuilding(buildingCModel, x, 0.0f, z, scaleBuildingC, rotY);
@@ -417,11 +428,11 @@ void DrawGround(void)
     const float z0 = PosVehicleZ - R, z1 = PosVehicleZ + R;
 
     v[0] = (V){color, x0, 0.0f, z0};
-    v[1] = (V){color, x1, 0.0f, z0};
-    v[2] = (V){color, x1, 0.0f, z1};
-    v[3] = v[0];
-    v[4] = v[2];
-    v[5] = (V){color, x0, 0.0f, z1};
+    v[1] = (V){color, x1, 0.0f, z1};   // era x1, z0
+    v[2] = (V){color, x1, 0.0f, z0};   // era x1, z1
+    v[3] = (V){color, x0, 0.0f, z0};
+    v[4] = (V){color, x0, 0.0f, z1};   // era x1, z1
+    v[5] = (V){color, x1, 0.0f, z1}; 
 
     sceGuDisable(GU_TEXTURE_2D);
     sceGumMatrixMode(GU_MODEL);
@@ -492,7 +503,7 @@ void InitGU()
     sceGuDepthFunc(GU_GEQUAL);
 
     sceGuEnable(GU_CULL_FACE);
-    sceGuFrontFace(GU_CW);
+    sceGuFrontFace(GU_CCW);
 
     // o CLIP_PLANES acaba com o problema de corte/flickering do chao perto da camera
     /*
@@ -507,9 +518,9 @@ void InitGU()
     o hardware do PSP tem opcao de fog. o custo eh zero pra GE do PSP.
     0xFF303030 usei pois a cor do FOG tem que ser a cor do céu também.
     */
-   sceGuEnable(GU_FOG);
-   //sceGuFog(7.0f, VIEW_RADIUS, 0xFF303030);
-    sceGuFog(10.0f, 28.0f, 0xFF303030); 
+    sceGuEnable(GU_FOG);
+    sceGuFog(7.0f, VIEW_RADIUS, 0xFF303030);
+    // sceGuFog(10.0f, 28.0f, 0xFF303030); 
     sceGuFinish();
     sceGuSync(0, 0);
 
@@ -607,6 +618,8 @@ int main() {
     float scaleBuildingA, scaleBuildingB, scaleBuildingC;
     LoadModels(scaleBuildingA, scaleBuildingB, scaleBuildingC);
 
+    LoadVehicleModels();
+
     sceKernelDcacheWritebackInvalidateAll();
     DefSpawnPosition(PosVehicleX, PosVehicleZ);
     LoadingScreen("Done.", list, fbp0);
@@ -622,7 +635,8 @@ int main() {
     while (1)
     {
         float dt = GetDeltaTime();
-        UpdateVehicle(dt);
+        //UpdateVehicle(dt);
+        UpdateVehiclePhysics(dt, )
 
         u64 t0, t1, t2;
         float res = (float)sceRtcGetTickResolution();
@@ -633,19 +647,20 @@ int main() {
         sceRtcGetCurrentTick(&t0);
 
         sceGuStart(GU_DIRECT, list);
+        
         sceGuClearColor(0xFF303030);
         sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
-        DrawSky();
+        //DrawSky();
         Begin2D();
         DrawBackdrop(angleVehicle);
         End2D();
-        SetupCamera();
+        SetupCamera(dt);
         DrawGround();
-        DrawBorderWall();
+        // DrawBorderWall();
         DrawBuildingsAndStreets(scaleBuildingA, scaleBuildingB, scaleBuildingC);
         FlushStreetTiles();
         DrawProps();
-        DrawVehicle();
+        //DrawVehicle();
         DrawHud();
 
         sceGuFinish();

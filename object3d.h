@@ -152,13 +152,10 @@ public:
     void desenha()
     {
         if (nFaces == 0 || verts == NULL) return;
-
-        sceGuDisable(GU_CULL_FACE);   // <-- modelos .tri tem winding inconsistente
-
         UseTexturePsp(textura);
-        int vtype = GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_NORMAL_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_3D;
+        int vtype = GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_NORMAL_32BITF
+                | GU_VERTEX_32BITF | GU_TRANSFORM_3D;
         sceGumDrawArray(GU_TRIANGLES, vtype, nFaces * 3, NULL, verts);
-        sceGuEnable(GU_CULL_FACE);    // reabilita pro resto (chao, etc)
     }
 };
 
